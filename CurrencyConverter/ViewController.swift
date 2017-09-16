@@ -8,6 +8,11 @@
 
 import UIKit
 
+struct FixerResponse {
+    let resultCurrency: String
+    let allCurrencies: [String]
+}
+
 class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDelegate {
 
     @IBOutlet weak var label: UILabel!
@@ -17,9 +22,20 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
     
     @IBOutlet weak var activityIndicator: UIActivityIndicatorView!
     
-    let currencies = ["RUB", "USD", "EUR"]
+    var currencies = [String]() {
+        didSet {
+            if oldValue == currencies {
+                pickerFrom.reloadAllComponents()
+                pickerTo.reloadAllComponents()
+            }
+        }
+    }
     
     var currenciesExceptBase: [String] {
+        if currencies.isEmpty {
+            return []
+        }
+        
         var result = currencies
         result.remove(at: pickerFrom.selectedRow(inComponent: 0))
         return result
@@ -35,10 +51,59 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
         pickerTo.dataSource = self
         
         activityIndicator.hidesWhenStopped = true
-        requestCurrenctCurrencyRate()
     }
     
-    func retrivedCurrencyRate(baseCurrency: String, toCurrency: String, completion: @escaping (String) -> Void) {
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        updateCurrencies()
+    }
+    
+    
+    func updateCurrencies() {
+        showProgress()
+        
+        self.retrivedCurrencyRate(baseCurrency: nil, toCurrency: nil) { [weak self] (value) in
+            DispatchQueue.main.async(execute: {
+                self?.dismiss(animated: true, completion: nil)
+                
+                guard let strongSelf = self else {
+                    return
+                }
+                
+                strongSelf.dismiss(animated: true, completion: nil)
+                if strongSelf.currencies.isEmpty {
+                    let alert = UIAlertController(title: "Error", message: "Unable to download currencies", preferredStyle: .alert)
+                    let okAction = UIAlertAction(title: "OK", style: UIAlertActionStyle.default) { action in
+                        strongSelf.updateCurrencies()
+                    }
+                    alert.addAction(okAction)
+                    
+                    strongSelf.present(alert, animated: true, completion: nil)
+                } else {
+                    strongSelf.pickerTo.reloadAllComponents()
+                    strongSelf.pickerFrom.reloadAllComponents()
+                    strongSelf.requestCurrentCurrencyRate()
+                }
+            })
+        }
+    }
+    
+    func showProgress() {
+        let alert = UIAlertController(title: nil, message: "Please wait...", preferredStyle: .alert)
+        
+        let loadingIndicator = UIActivityIndicatorView(frame: CGRect(x: 10, y: 5, width: 50, height: 50))
+        loadingIndicator.hidesWhenStopped = true
+        loadingIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyle.gray
+        loadingIndicator.startAnimating();
+        
+        alert.view.addSubview(loadingIndicator)
+        present(alert, animated: true, completion: nil)
+    }
+    
+    
+    
+    func retrivedCurrencyRate(baseCurrency: String?, toCurrency: String?, completion: @escaping (String) -> Void) {
         self.requestCurrencyRates(baseCurrency: baseCurrency) { [weak self] (data, error) in
             var string = "No currency retrived!"
             
@@ -54,7 +119,8 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
         }
     }
     
-    func requestCurrencyRates(baseCurrency: String, parseHandler: @escaping (Data?, Error?) -> Void) {
+    func requestCurrencyRates(baseCurrency: String?, parseHandler: @escaping (Data?, Error?) -> Void) {
+        let baseCurrency = baseCurrency ?? "USD"
         let url = URL(string: "https://api.fixer.io/latest?base=" + baseCurrency)!
         
         let dataTask = URLSession.shared.dataTask(with: url) {
@@ -65,7 +131,7 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
         dataTask.resume()
     }
     
-    func parseCurrencyRatesResponse(data: Data?, toCurrency: String) -> String {
+    func parseCurrencyRatesResponse(data: Data?, toCurrency: String?) -> String {
         var value = ""
         
         do {
@@ -73,6 +139,12 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
             if let parsedJSON = json {
                 print("\(parsedJSON)")
                 if let rates = parsedJSON["rates"] as? [String : Double] {
+                    
+                    guard let toCurrency = toCurrency else {
+                        currencies = Array(rates.keys).sorted()
+                        return value
+                    }
+                    
                     if let rate = rates[toCurrency] {
                         value = String(rate)
                     } else {
@@ -91,7 +163,7 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
         return value
     }
     
-    func requestCurrenctCurrencyRate() {
+    func requestCurrentCurrencyRate() {
         self.activityIndicator.startAnimating()
         self.label.text = ""
         
@@ -103,10 +175,8 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
         
         self.retrivedCurrencyRate(baseCurrency: baseCurrency, toCurrency: toCurrency) { [weak self] (value) in
             DispatchQueue.main.async(execute: {
-                if let strongRef = self {
-                    strongRef.label.text = value
-                    strongRef.activityIndicator.stopAnimating()
-                }
+                self?.label.text = value
+                self?.activityIndicator.stopAnimating()
             })
         }
     }
@@ -140,7 +210,7 @@ class ViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDele
             self.pickerTo.reloadAllComponents()
         }
         
-        self.requestCurrenctCurrencyRate()
+        self.requestCurrentCurrencyRate()
     }
 }
 
